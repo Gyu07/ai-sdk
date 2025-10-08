@@ -1,0 +1,115 @@
+name: Auto Sync with Upstream
+
+on:
+  schedule:
+    # 毎日午前3時（UTC）= 日本時間正午12時に実行
+    - cron: '0 3 * * *'
+  workflow_dispatch: # 手動実行も可能
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config merge.ours.driver true
+      
+      - name: Backup automation files
+        run: |
+          echo "Backing up automation and config files..."
+          mkdir -p /tmp/protected-files/.github/workflows
+          
+          # GitHub Actionsのワークフローファイルを保護
+          if [ -d ".github/workflows" ]; then
+            cp -r .github/workflows/* /tmp/protected-files/.github/workflows/ 2>/dev/null || true
+          fi
+          
+          # .gitattributes を保護
+          if [ -f ".gitattributes" ]; then
+            cp .gitattributes /tmp/protected-files/
+          fi
+          
+          # その他の設定ファイルも必要に応じて保護
+          if [ -f ".github/dependabot.yml" ]; then
+            cp .github/dependabot.yml /tmp/protected-files/
+          fi
+          
+          echo "Backup completed"
+      
+      - name: Add and fetch upstream
+        run: |
+          git remote add upstream https://github.com/vercel/ai.git || true
+          git fetch upstream
+          echo "Fetched latest changes from vercel/ai"
+      
+      - name: Merge upstream changes
+        run: |
+          git checkout main
+          git merge upstream/main --no-edit --allow-unrelated-histories || {
+            echo "::warning::Merge conflict occurred. Attempting to resolve..."
+            # コンフリクトが発生した場合でも続行
+            git merge --abort 2>/dev/null || true
+            git merge upstream/main --strategy-option=theirs --no-edit --allow-unrelated-histories
+          }
+      
+      - name: Restore protected files
+        run: |
+          echo "Restoring automation files..."
+          
+          # ワークフローファイルを復元
+          if [ -d "/tmp/protected-files/.github/workflows" ]; then
+            mkdir -p .github/workflows
+            cp -r /tmp/protected-files/.github/workflows/* .github/workflows/
+          fi
+          
+          # .gitattributes を復元
+          if [ -f "/tmp/protected-files/.gitattributes" ]; then
+            cp /tmp/protected-files/.gitattributes .gitattributes
+          fi
+          
+          # その他の設定ファイルを復元
+          if [ -f "/tmp/protected-files/dependabot.yml" ]; then
+            mkdir -p .github
+            cp /tmp/protected-files/dependabot.yml .github/dependabot.yml
+          fi
+          
+          # 復元した変更をステージング
+          git add .github/ .gitattributes 2>/dev/null || true
+          
+          # 変更があればコミット
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: restore automation files after upstream sync"
+            echo "Protected files restored and committed"
+          else
+            echo "No changes to protected files"
+          fi
+      
+      - name: Push changes
+        run: |
+          git push origin main
+          echo "::notice::Successfully synced with upstream vercel/ai"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Upstream Repository**: vercel/ai" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Branch**: main" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Protected Files:" >> $GITHUB_STEP_SUMMARY
+          echo "- `.github/workflows/*` (automation files)" >> $GITHUB_STEP_SUMMARY
+          echo "- `.gitattributes` (Git configuration)" >> $GITHUB_STEP_SUMMARY
