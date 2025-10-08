@@ -1,0 +1,14 @@
+# 自動同期の設定ファイルを保護
+# これらのファイルは上流の変更で上書きされません
+
+# GitHub Actionsワークフローファイル
+.github/workflows/* merge=ours
+
+# Git設定ファイル
+.gitattributes merge=ours
+
+# その他の自動化設定（必要に応じて追加）
+.github/dependabot.yml merge=ours
+
+# READMEをカスタマイズしている場合（オプション）
+# README.md merge=ours
